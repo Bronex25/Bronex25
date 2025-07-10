@@ -16,7 +16,7 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 
 - **Gadget Store** – [🔗 Demo](https://bronex25.github.io/gadget-store/) | [📂 Code](https://github.com/Bronex25/gadget-store)  
 - **Todo App** – [🔗 Demo](https://bronex25.github.io/todo-app_react-api/) | [📂 Code](https://github.com/Bronex25/todo-app_react-api)  
-- **2048 Game** – [🔗 Demo](https://bronex25.github.io/2048-game/) | [📂 Code](https://github.com/Bronex25/2048-game)
+- **2048 Game** – [🔗 Demo](https://bronex25.github.io/JS_2048/) | [📂 Code](https://github.com/Bronex25/JS_2048)
 
 ---
 
