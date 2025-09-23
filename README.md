@@ -6,8 +6,8 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 ---
 
 ### 🛠 Tech Stack  
-<p align="center">
-  <img src="https://skillicons.dev/icons?i=js,ts,html,css,sass,tailwind,react,redux,vite,git,github,bash,npm,vscode,figma," alt="Tech Stack" />
+<p align="left">
+  <img src="https://skillicons.dev/icons?i=js,ts,html,css,sass,tailwind,react,next,redux,vite,git,github,bash,npm,vscode" alt="Tech Stack" />
 </p>
 
 ---
@@ -22,8 +22,7 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 ---
 
 ### 📚 Learning & Growth  
-- Web3 integration  
-- Next.js  
+- Next.js
 - Performance optimization  
 - Clean code principles
 
