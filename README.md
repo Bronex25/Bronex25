@@ -21,6 +21,7 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
   [🔗 Demo](https://bronex25.github.io/gadget-store/) | [📂 Code](https://github.com/Bronex25/gadget-store)
 
 - **School Management App** – Web application built with Next.js to manage students, assignments, attendance, and analytics dashboards. Implements role-based access, reusable UI architecture, and server components.
+  
   [📂 Code](https://github.com/Bronex25/school-management-app)
 
 - **Todo App** – CRUD app using REST API with filtering and data persistence.  
