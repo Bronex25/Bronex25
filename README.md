@@ -20,7 +20,7 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 - **Gadget Store** – Responsive e-commerce app with cart, filtering, and Supabase backend.  
   [🔗 Demo](https://bronex25.github.io/gadget-store/) | [📂 Code](https://github.com/Bronex25/gadget-store)
 
-- **Scholario** – Web application built with Next.js to manage students, assignments, attendance, and analytics dashboards. Implements role-based access, reusable UI architecture, and server components.
+- **Scholario** – Web application built with Next.js to manage students, assignments, attendance, and analytics dashboards. Implements role-based access, reusable UI architecture, and server components.                     
   [🔗 Demo](https://scholario-zeta.vercel.app/) | [📂 Code](https://github.com/Bronex25/school-management-app)
 
 - **Todo App** – CRUD app using REST API with filtering and data persistence.  
@@ -28,13 +28,6 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 
 - **2048 Game** – Classic 2048 puzzle logic implemented fully in JavaScript.  
   [🔗 Demo](https://bronex25.github.io/JS_2048/) | [📂 Code](https://github.com/Bronex25/JS_2048)
-
----
-
-### 📚 Learning & Growth  
-- Next.js
-- Performance optimization  
-- Clean code principles
 
 ---
 
