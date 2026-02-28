@@ -14,7 +14,7 @@ Based in Barcelona 🇪🇸 | From Ukraine 🇺🇦
 
 ### 🧩 Featured Projects
 
-- **Crypto Dashboard** – Web3 app with wallet connection, token balances, and live price tracking.  
+- **Coin Atlas** – Web3 app with wallet connection, token balances, and live price tracking.  
   [🔗 Demo](https://bronex25.github.io/coin-atlas/) | [📂 Code](https://github.com/Bronex25/token-dashboard)
 
 - **Gadget Store** – Responsive e-commerce app with cart, filtering, and Supabase backend.  
