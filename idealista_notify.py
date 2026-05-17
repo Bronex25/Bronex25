@@ -15,8 +15,10 @@ import imaplib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 from email.message import Message
 from pathlib import Path
 
@@ -222,28 +224,69 @@ def canonical_listing_id(url: str) -> str:
 
 
 TELEGRAM_CAPTION_LIMIT = 1024
+TELEGRAM_RETRYABLE_HTTP = {500, 502, 503, 504}
+TELEGRAM_MAX_RETRIES = 4
+
+
+def _balance_html_tags(html: str) -> str:
+    """Close any <b>/<i>/<a> tags left dangling after a hard truncation."""
+    for tag in ("a", "b", "i"):
+        open_count = len(re.findall(rf"<{tag}\b", html))
+        close_count = len(re.findall(rf"</{tag}>", html))
+        if open_count > close_count:
+            html += f"</{tag}>" * (open_count - close_count)
+    return html
 
 
 def _truncate_caption(html: str) -> str:
     if len(html) <= TELEGRAM_CAPTION_LIMIT:
         return html
-    cut = html.rfind("\n", 0, TELEGRAM_CAPTION_LIMIT - 1)
-    return (html[:cut] if cut > 0 else html[: TELEGRAM_CAPTION_LIMIT - 1]).rstrip() + "…"
+    cut = html.rfind("\n", 0, TELEGRAM_CAPTION_LIMIT - 2)
+    body = html[:cut] if cut > 0 else html[: TELEGRAM_CAPTION_LIMIT - 2]
+    return _balance_html_tags(body.rstrip() + "…")
+
+
+def _telegram_post(method: str, payload: dict, timeout: float = 30.0) -> None:
+    """POST to the Telegram Bot API with 429 + 5xx retry handling."""
+    url = f"{TELEGRAM_API}/{method}"
+    for attempt in range(TELEGRAM_MAX_RETRIES):
+        resp = httpx.post(url, json=payload, timeout=timeout)
+        if resp.status_code == 200:
+            try:
+                ok = resp.json().get("ok", False)
+            except ValueError:
+                ok = False
+            if ok:
+                return
+            raise RuntimeError(f"Telegram {method} returned ok=false: {resp.text[:300]}")
+
+        if resp.status_code == 429:
+            try:
+                retry_after = int(resp.json().get("parameters", {}).get("retry_after", 1))
+            except (ValueError, KeyError, TypeError):
+                retry_after = 1
+            time.sleep(min(retry_after + 1, 60))
+            continue
+
+        if resp.status_code in TELEGRAM_RETRYABLE_HTTP and attempt < TELEGRAM_MAX_RETRIES - 1:
+            time.sleep(2 ** attempt)
+            continue
+
+        raise RuntimeError(f"Telegram {method} {resp.status_code}: {resp.text[:300]}")
+
+    raise RuntimeError(f"Telegram {method} failed after {TELEGRAM_MAX_RETRIES} retries")
 
 
 def _send_text(html: str) -> None:
-    resp = httpx.post(
-        f"{TELEGRAM_API}/sendMessage",
-        json={
+    _telegram_post(
+        "sendMessage",
+        {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": html,
             "parse_mode": "HTML",
             "disable_web_page_preview": False,
         },
-        timeout=30.0,
     )
-    if resp.status_code != 200:
-        raise RuntimeError(f"Telegram sendMessage {resp.status_code}: {resp.text}")
 
 
 def _send_with_images(html: str, images: list[str]) -> None:
@@ -257,19 +300,22 @@ def _send_with_images(html: str, images: list[str]) -> None:
             }
             for i, url in enumerate(images)
         ]
-        endpoint = f"{TELEGRAM_API}/sendMediaGroup"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
+        _telegram_post(
+            "sendMediaGroup",
+            {"chat_id": TELEGRAM_CHAT_ID, "media": media},
+            timeout=60.0,
+        )
     else:
-        endpoint = f"{TELEGRAM_API}/sendPhoto"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "photo": images[0],
-            "caption": _truncate_caption(html),
-            "parse_mode": "HTML",
-        }
-    resp = httpx.post(endpoint, json=payload, timeout=60.0)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Telegram photo send {resp.status_code}: {resp.text}")
+        _telegram_post(
+            "sendPhoto",
+            {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "photo": images[0],
+                "caption": _truncate_caption(html),
+                "parse_mode": "HTML",
+            },
+            timeout=60.0,
+        )
 
 
 def send_telegram(html: str, images: list[str] | None = None) -> None:
@@ -287,6 +333,15 @@ def send_telegram(html: str, images: list[str] | None = None) -> None:
 
 
 def main() -> int:
+    if shutil.which(CLAUDE_BIN) is None:
+        print(
+            f"Error: '{CLAUDE_BIN}' not found on PATH. Install Claude Code with:\n"
+            "  curl -fsSL https://claude.ai/install.sh | bash\n"
+            "and ensure ~/.local/bin is on PATH, then re-run.",
+            file=sys.stderr,
+        )
+        return 2
+
     seen = load_seen()
     seen_set = set(seen)
 
