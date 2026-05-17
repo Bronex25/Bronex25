@@ -74,9 +74,15 @@ Extra rules:
 - Price-per-m² verdict: only include it if you can compute €/m² AND have reasonable confidence about that neighborhood's rental market. Otherwise omit the whole 💰 line.
 - Keep the message under 800 characters total.
 
+The email body contains image markers of the form [img:https://...]. For each
+listing, attribute the photos that appear in or directly around its block — they
+are listing thumbnails. Skip logos, social icons, banner/header graphics, and
+anything that clearly isn't a photo of the property. Take at most 8 per listing.
+
 Output strict JSON: an array of objects, each with keys:
   "listing_id"   -> canonical idealista.com URL of the listing (used for dedup)
   "telegram_html" -> the message body as described above
+  "images"       -> array of image URLs for this listing (0 to 8 entries)
 
 Output ONLY the JSON array, no prose, no code fences.
 If the email contains zero listings, output [].
@@ -142,6 +148,17 @@ def extract_body_text(msg: Message) -> str:
         soup = BeautifulSoup(html_part, "html.parser")
         for tag in soup(["script", "style"]):
             tag.decompose()
+        # Preserve image URLs as inline markers so Claude can attribute photos
+        # to the listing they appear next to. Skip 1x1 pixels and data URIs.
+        for img in soup.find_all("img", src=True):
+            src = img["src"].strip()
+            if not src or src.startswith("data:"):
+                img.decompose()
+                continue
+            if img.get("width") in {"1", "0"} or img.get("height") in {"1", "0"}:
+                img.decompose()
+                continue
+            img.replace_with(f"[img:{src}]")
         # Preserve hrefs so Claude sees the canonical listing URLs.
         for a in soup.find_all("a", href=True):
             href = a["href"]
@@ -198,17 +215,52 @@ def canonical_listing_id(url: str) -> str:
     return f"idealista:{m.group(1)}" if m else url
 
 
-def send_telegram(html: str) -> None:
-    resp = httpx.post(
-        f"{TELEGRAM_API}/sendMessage",
-        json={
+TELEGRAM_CAPTION_LIMIT = 1024
+
+
+def _truncate_caption(html: str) -> str:
+    if len(html) <= TELEGRAM_CAPTION_LIMIT:
+        return html
+    cut = html.rfind("\n", 0, TELEGRAM_CAPTION_LIMIT - 1)
+    return (html[:cut] if cut > 0 else html[: TELEGRAM_CAPTION_LIMIT - 1]).rstrip() + "…"
+
+
+def send_telegram(html: str, images: list[str] | None = None) -> None:
+    images = [u for u in (images or []) if u][:10]
+
+    if len(images) >= 2:
+        caption = _truncate_caption(html)
+        media = [
+            {
+                "type": "photo",
+                "media": url,
+                **({"caption": caption, "parse_mode": "HTML"} if i == 0 else {}),
+            }
+            for i, url in enumerate(images)
+        ]
+        url = f"{TELEGRAM_API}/sendMediaGroup"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "media": media}
+        timeout = 60.0
+    elif len(images) == 1:
+        url = f"{TELEGRAM_API}/sendPhoto"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "photo": images[0],
+            "caption": _truncate_caption(html),
+            "parse_mode": "HTML",
+        }
+        timeout = 60.0
+    else:
+        url = f"{TELEGRAM_API}/sendMessage"
+        payload = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": html,
             "parse_mode": "HTML",
             "disable_web_page_preview": False,
-        },
-        timeout=30.0,
-    )
+        }
+        timeout = 30.0
+
+    resp = httpx.post(url, json=payload, timeout=timeout)
     if resp.status_code != 200:
         raise RuntimeError(f"Telegram API {resp.status_code}: {resp.text}")
 
@@ -233,7 +285,7 @@ def main() -> int:
                 lid = canonical_listing_id(str(listing.get("listing_id", "")))
                 if not lid or lid in seen_set:
                     continue
-                send_telegram(listing["telegram_html"])
+                send_telegram(listing["telegram_html"], listing.get("images"))
                 seen.append(lid)
                 seen_set.add(lid)
                 sent += 1
