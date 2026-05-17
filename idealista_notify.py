@@ -42,23 +42,41 @@ CLAUDE_TIMEOUT = 180
 ATICCO_URQUINAONA = "Aticco Urquinaona (Pl. d'Urquinaona, Eixample) — metro L1/L4 Urquinaona"
 ATICCO_DIAGRAME = "Aticco Diagrame (Carrer de Pere IV 105, Poblenou / 22@) — metro L1 Glòries, L4 Llacuna"
 
-CLAUDE_PROMPT_TEMPLATE = """You are processing an Idealista alert email for a Barcelona apartment hunter.
+CLAUDE_PROMPT_TEMPLATE = """You are processing an Idealista alert email for a Barcelona apartment hunter
+who works at two coworking offices:
+  * {urquinaona}
+  * {diagrame}
 
-The user wants short Telegram messages, one per distinct listing in the email,
-each with:
-  - the listing's headline (operation type, rooms, neighborhood) in its original language
-  - price in EUR and size in m² if visible
-  - 1 short sentence on the neighborhood vibe (don't invent facts you don't know)
-  - estimated door-to-door commute by metro+walk to each of:
-      * {urquinaona}
-      * {diagrame}
-    Express each commute as a single integer minutes estimate, e.g. "~22 min".
-    If you genuinely cannot estimate (no address visible), say "n/a".
-  - the listing URL
+For each distinct apartment listing in the email, produce one Telegram message.
+The message is HTML (parse_mode=HTML). You may use <b>, <i>, <a>, real newlines,
+and emojis. Do NOT use <br>, headings, or code fences.
+
+Use this exact layout, OMITTING any line whose data is not visible in the email
+(do not invent facts). Keep each line short — one line, no wrap-padding.
+
+🏠 <b>{{TITLE in original Spanish/Catalan}}</b>
+💶 {{price}}/mo · 📐 {{m²}} m² · 🛏 {{N}} bed · 🏢 {{floor}}
+✨ {{up to 4 extras visible in the email, " · " separated: lift, furnished, terrace, balcony, parking, AC, heating, pets, exterior, renovated, etc.}}
+💰 {{€/m²}} — <i>{{one word verdict vs Barcelona market for that neighborhood: cheap, fair, pricey, or skip the whole line if unknown}}</i>
+
+📍 <i>{{one short sentence on the neighborhood; skip if you don't actually know it}}</i>
+
+🚇 <b>Urquinaona</b> · ~{{N}} min — {{short route, e.g. "M L4 Jaume I, 4 stops" or "Rodalies R1 → Arc de Triomf → L1, +8 min walk"}}
+🚇 <b>Diagrame</b> · ~{{N}} min — {{short route}}
+
+🔗 <a href="{{URL}}">Ver anuncio</a>
+
+Extra rules:
+- Commute is door-to-door (walk + transit + walk), single integer minutes.
+- If you genuinely cannot estimate a commute (no address visible at all), write "n/a" instead of a number and skip the route.
+- If BOTH commutes are >50 min, prepend this line to the message:
+  ⚠️ <i>Far from both offices</i>
+- Price-per-m² verdict: only include it if you can compute €/m² AND have reasonable confidence about that neighborhood's rental market. Otherwise omit the whole 💰 line.
+- Keep the message under 800 characters total.
 
 Output strict JSON: an array of objects, each with keys:
-  "listing_id"  -> canonical idealista.com URL of the listing (used for dedup)
-  "telegram_html" -> message body, Telegram HTML (use <b>, <i>, <a>; no <br>, no emojis)
+  "listing_id"   -> canonical idealista.com URL of the listing (used for dedup)
+  "telegram_html" -> the message body as described above
 
 Output ONLY the JSON array, no prose, no code fences.
 If the email contains zero listings, output [].
