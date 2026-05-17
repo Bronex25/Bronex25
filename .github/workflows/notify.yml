@@ -41,10 +41,21 @@ jobs:
 
       - name: Commit seen.json if changed
         run: |
-          if [[ -n "$(git status --porcelain seen.json)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add seen.json
-            git commit -m "Update seen listings"
-            git push
+          if [[ -z "$(git status --porcelain seen.json)" ]]; then
+            exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen.json
+          git commit -m "Update seen listings"
+          # main can move between checkout and push (concurrent runs, PR merges).
+          # Rebase onto the latest main and retry the push with backoff.
+          for delay in 2 4 8 16; do
+            if git pull --rebase --autostash origin main && git push; then
+              exit 0
+            fi
+            echo "push failed, retrying in ${delay}s"
+            sleep "$delay"
+          done
+          echo "giving up after retries"
+          exit 1
