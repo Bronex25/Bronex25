@@ -227,15 +227,28 @@ TELEGRAM_CAPTION_LIMIT = 1024
 TELEGRAM_RETRYABLE_HTTP = {500, 502, 503, 504}
 TELEGRAM_MAX_RETRIES = 4
 
+_TELEGRAM_INLINE_TAGS = {"b", "i", "a"}
+_TAG_RE = re.compile(r"<(/?)([a-z]+)\b[^>]*>", re.IGNORECASE)
+
 
 def _balance_html_tags(html: str) -> str:
-    """Close any <b>/<i>/<a> tags left dangling after a hard truncation."""
-    for tag in ("a", "b", "i"):
-        open_count = len(re.findall(rf"<{tag}\b", html))
-        close_count = len(re.findall(rf"</{tag}>", html))
-        if open_count > close_count:
-            html += f"</{tag}>" * (open_count - close_count)
-    return html
+    """Drop any dangling partial tag and close any open <b>/<i>/<a>."""
+    last_lt = html.rfind("<")
+    last_gt = html.rfind(">")
+    if last_lt > last_gt:
+        html = html[:last_lt].rstrip()
+
+    stack: list[str] = []
+    for m in _TAG_RE.finditer(html):
+        tag = m.group(2).lower()
+        if tag not in _TELEGRAM_INLINE_TAGS:
+            continue
+        if m.group(1):  # closing tag
+            if stack and stack[-1] == tag:
+                stack.pop()
+        else:
+            stack.append(tag)
+    return html + "".join(f"</{t}>" for t in reversed(stack))
 
 
 def _truncate_caption(html: str) -> str:
@@ -247,10 +260,17 @@ def _truncate_caption(html: str) -> str:
 
 
 def _telegram_post(method: str, payload: dict, timeout: float = 30.0) -> None:
-    """POST to the Telegram Bot API with 429 + 5xx retry handling."""
+    """POST to the Telegram Bot API with retry on 429, 5xx, and network errors."""
     url = f"{TELEGRAM_API}/{method}"
     for attempt in range(TELEGRAM_MAX_RETRIES):
-        resp = httpx.post(url, json=payload, timeout=timeout)
+        try:
+            resp = httpx.post(url, json=payload, timeout=timeout)
+        except httpx.RequestError as e:
+            if attempt < TELEGRAM_MAX_RETRIES - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f"Telegram {method} network error: {e}") from e
+
         if resp.status_code == 200:
             try:
                 ok = resp.json().get("ok", False)
