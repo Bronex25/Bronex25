@@ -23,6 +23,7 @@ import sys
 import time
 from email.message import Message
 from pathlib import Path
+from urllib.parse import unquote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -253,8 +254,10 @@ def call_claude(subject: str, body: str) -> list[dict]:
 
 
 def canonical_listing_id(url: str) -> str:
-    m = re.search(r"idealista\.com/(?:[a-z]+/)?inmueble/(\d+)", url)
-    return f"idealista:{m.group(1)}" if m else url
+    # Idealista alert links are often tracking redirects with the real URL
+    # percent-encoded inside; unquote first so the listing ID is reachable.
+    m = re.search(r"/inmueble/(\d+)", unquote(url))
+    return f"idealista:{m.group(1)}" if m else url.strip()
 
 
 TELEGRAM_CAPTION_LIMIT = 1024
@@ -401,7 +404,11 @@ def main() -> int:
     processed_emails = load_processed_emails()
     processed_email_set = set(processed_emails)
 
-    messages = fetch_emails()
+    try:
+        messages = fetch_emails()
+    except (imaplib.IMAP4.error, OSError) as e:
+        print(f"Gmail fetch FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
     print(f"Fetched {len(messages)} idealista email(s) from Gmail")
 
     sent = 0
@@ -428,8 +435,13 @@ def main() -> int:
                 print(f"  email '{subject[:60]}' FAILED: {type(e).__name__}: {e}")
                 continue
 
+            # Claude has analyzed this email — record it now so a later
+            # Telegram failure can't trigger a costly re-analysis next run.
+            # Sent listings are still deduplicated separately via seen.json.
+            processed_emails.append(email_id)
+            processed_email_set.add(email_id)
+
             print(f"  email '{subject[:60]}' → {len(listings)} listing(s)")
-            email_complete = True
             for listing in listings:
                 lid = canonical_listing_id(str(listing.get("listing_id", "")))
                 if not lid or lid in seen_set:
@@ -438,15 +450,11 @@ def main() -> int:
                     send_telegram(listing["telegram_html"], listing.get("images"))
                 except Exception as e:
                     failed_listings += 1
-                    email_complete = False
                     print(f"    listing {lid} FAILED: {type(e).__name__}: {e}")
                     continue
                 seen.append(lid)
                 seen_set.add(lid)
                 sent += 1
-            if email_complete:
-                processed_emails.append(email_id)
-                processed_email_set.add(email_id)
     finally:
         save_seen(seen)
         save_processed_emails(processed_emails)
