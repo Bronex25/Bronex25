@@ -6,7 +6,7 @@ Polls a Gmail inbox every 15 minutes for Idealista alert emails, asks Claude (vi
 Gmail IMAP  →  HTML→text  →  Claude (extract + analyze)  →  Telegram
 ```
 
-Already-seen listing URLs are tracked in `seen.json`, which the workflow commits back so nothing is sent twice.
+Already-seen listing URLs are tracked in `seen.json`, and already-analyzed email IDs are tracked in `processed_emails.json`. The workflow commits both state files back so nothing is sent twice and old emails do not get re-analyzed by Claude on every cron run.
 
 ## What you get per listing
 
@@ -92,13 +92,14 @@ Requires the `claude` CLI on `PATH` (see step 3).
 | Message layout / language | `CLAUDE_PROMPT_TEMPLATE` in `idealista_notify.py` |
 | Gmail sender filter / lookback | `GMAIL_SEARCH` (Gmail `X-GM-RAW` syntax) |
 | Poll interval | `cron` in `.github/workflows/notify.yml` (GitHub minimum 5 min) |
-| Claude model | `CLAUDE_MODEL` env var (defaults to `claude-sonnet-4-6`) |
+| Claude model | `CLAUDE_MODEL` env var (defaults to Claude Code's `haiku` alias) |
 
 ## Robustness
 
 The notifier survives common failure modes:
 
 - **Per-email isolation** — a Claude timeout on one email doesn't drop the rest of the batch.
+- **Claude usage control** — emails that were already analyzed are skipped before Claude is called, even though Gmail returns a rolling 3-day alert window.
 - **Per-listing isolation** — a single bad Telegram send is logged and skipped.
 - **Photo-fetch fallback** — if Telegram can't pull a listing's images from the Idealista CDN, the message is re-sent as text-only so it isn't lost.
 - **Telegram 429 / 5xx retry** — honours `retry_after` from rate-limit responses, exponential backoff on transient 5xx.

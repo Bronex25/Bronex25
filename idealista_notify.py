@@ -6,11 +6,13 @@ Pipeline:
 
 Claude both extracts listings from each alert email and produces a short
 Telegram-ready summary including commute estimates to Aticco Urquinaona and
-Aticco Diagrame. Listings are deduplicated against seen.json by canonical URL.
+Aticco Diagrame. Emails are deduplicated before Claude by message ID, and
+listings are deduplicated against seen.json by canonical URL.
 """
 from __future__ import annotations
 
 import email
+import hashlib
 import imaplib
 import json
 import os
@@ -31,14 +33,16 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 SEEN_PATH = Path(__file__).parent / "seen.json"
+PROCESSED_EMAILS_PATH = Path(__file__).parent / "processed_emails.json"
 MAX_SEEN = 2000
+MAX_PROCESSED_EMAILS = 5000
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 GMAIL_HOST = "imap.gmail.com"
 GMAIL_SEARCH = '(X-GM-RAW "from:idealista.com newer_than:3d")'
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "haiku")
 CLAUDE_TIMEOUT = 120
 
 ATICCO_URQUINAONA = "Aticco Urquinaona (Pl. d'Urquinaona, Eixample) — metro L1/L4 Urquinaona"
@@ -106,22 +110,36 @@ def save_seen(seen: list[str]) -> None:
     SEEN_PATH.write_text(json.dumps(seen[-MAX_SEEN:], indent=2) + "\n")
 
 
+def load_processed_emails() -> list[str]:
+    if not PROCESSED_EMAILS_PATH.exists():
+        return []
+    return json.loads(PROCESSED_EMAILS_PATH.read_text())
+
+
+def save_processed_emails(processed_emails: list[str]) -> None:
+    PROCESSED_EMAILS_PATH.write_text(
+        json.dumps(processed_emails[-MAX_PROCESSED_EMAILS:], indent=2) + "\n"
+    )
+
+
 def fetch_emails() -> list[Message]:
     with imaplib.IMAP4_SSL(GMAIL_HOST) as imap:
         imap.login(GMAIL_USERNAME, GMAIL_APP_PASSWORD)
         imap.select("INBOX", readonly=True)
-        typ, data = imap.search(None, GMAIL_SEARCH)
+        typ, data = imap.uid("search", None, GMAIL_SEARCH)
         if typ != "OK" or not data or not data[0]:
             return []
         uids = data[0].split()
         messages: list[Message] = []
         for uid in uids:
-            typ, fetched = imap.fetch(uid, "(BODY.PEEK[])")
+            typ, fetched = imap.uid("fetch", uid, "(BODY.PEEK[])")
             if typ != "OK" or not fetched:
                 continue
             for part in fetched:
                 if isinstance(part, tuple) and len(part) >= 2:
-                    messages.append(email.message_from_bytes(part[1]))
+                    msg = email.message_from_bytes(part[1])
+                    msg["X-IMAP-UID"] = uid.decode("ascii", errors="replace")
+                    messages.append(msg)
                     break
         return messages
 
@@ -182,6 +200,22 @@ def decode_header(value: str | None) -> str:
         else:
             out.append(chunk)
     return "".join(out).strip()
+
+
+def email_fingerprint(msg: Message) -> str:
+    message_id = msg.get("Message-ID")
+    if message_id:
+        return f"message-id:{message_id.strip().lower()}"
+
+    imap_uid = msg.get("X-IMAP-UID")
+    if imap_uid:
+        return f"imap-uid:{imap_uid.strip()}"
+
+    fallback = "\n".join(
+        decode_header(msg.get(name)) for name in ("From", "To", "Subject", "Date")
+    )
+    digest = hashlib.sha256(fallback.encode("utf-8", errors="replace")).hexdigest()
+    return f"headers-sha256:{digest}"
 
 
 def call_claude(subject: str, body: str) -> list[dict]:
@@ -364,19 +398,29 @@ def main() -> int:
 
     seen = load_seen()
     seen_set = set(seen)
+    processed_emails = load_processed_emails()
+    processed_email_set = set(processed_emails)
 
     messages = fetch_emails()
     print(f"Fetched {len(messages)} idealista email(s) from Gmail")
 
     sent = 0
+    skipped_emails = 0
     failed_emails = 0
     failed_listings = 0
     try:
         for msg in messages:
             subject = decode_header(msg.get("Subject"))
+            email_id = email_fingerprint(msg)
+            if email_id in processed_email_set:
+                skipped_emails += 1
+                continue
+
             try:
                 body = extract_body_text(msg)
                 if not body.strip():
+                    processed_emails.append(email_id)
+                    processed_email_set.add(email_id)
                     continue
                 listings = call_claude(subject, body)
             except Exception as e:
@@ -385,6 +429,7 @@ def main() -> int:
                 continue
 
             print(f"  email '{subject[:60]}' → {len(listings)} listing(s)")
+            email_complete = True
             for listing in listings:
                 lid = canonical_listing_id(str(listing.get("listing_id", "")))
                 if not lid or lid in seen_set:
@@ -393,15 +438,23 @@ def main() -> int:
                     send_telegram(listing["telegram_html"], listing.get("images"))
                 except Exception as e:
                     failed_listings += 1
+                    email_complete = False
                     print(f"    listing {lid} FAILED: {type(e).__name__}: {e}")
                     continue
                 seen.append(lid)
                 seen_set.add(lid)
                 sent += 1
+            if email_complete:
+                processed_emails.append(email_id)
+                processed_email_set.add(email_id)
     finally:
         save_seen(seen)
+        save_processed_emails(processed_emails)
 
-    print(f"Sent {sent} new listing(s); {failed_emails} email failures, {failed_listings} listing failures")
+    print(
+        f"Sent {sent} new listing(s); skipped {skipped_emails} already-processed email(s); "
+        f"{failed_emails} email failures, {failed_listings} listing failures"
+    )
     return 0
 
 
