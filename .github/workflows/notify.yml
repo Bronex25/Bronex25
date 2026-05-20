@@ -2,7 +2,9 @@ name: Idealista notifier
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Every 15 min within a UTC window that brackets 09:00-21:00 Europe/Madrid
+    # for both CET and CEST. The gate job below trims it to the exact local hours.
+    - cron: "*/15 7-19 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +15,31 @@ permissions:
   contents: write
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      active: ${{ steps.check.outputs.active }}
+    steps:
+      - name: Check working hours (09:00-21:00 Europe/Madrid)
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manual run — bypassing working-hours gate."
+            echo "active=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          hour=$(TZ=Europe/Madrid date +%-H)
+          if (( hour >= 9 && hour < 21 )); then
+            echo "Within working hours (${hour}:xx Europe/Madrid) — running."
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Outside 09:00-21:00 Europe/Madrid (${hour}:xx) — skipping."
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          fi
+
   notify:
+    needs: gate
+    if: needs.gate.outputs.active == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

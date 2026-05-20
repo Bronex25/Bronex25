@@ -1,6 +1,6 @@
 # Idealista → Telegram notifier
 
-Polls a Gmail inbox every 15 minutes for Idealista alert emails, asks Claude (via your Max-plan OAuth token) to extract each listing and produce a short Barcelona-specific summary — including estimated metro commute to **Aticco Urquinaona** and **Aticco Diagrame** — and posts one message per listing to a Telegram chat with photos as an album. Runs entirely on GitHub Actions, no server.
+Polls a Gmail inbox every 15 minutes — between 09:00 and 21:00 Barcelona time — for Idealista alert emails, asks Claude (via your Max-plan OAuth token) to extract each listing and produce a short Barcelona-specific summary — including estimated metro commute to **Aticco Urquinaona** and **Aticco Diagrame** — and posts one message per listing to a Telegram chat with photos as an album. Runs entirely on GitHub Actions, no server.
 
 ```
 Gmail IMAP  →  HTML→text  →  Claude (extract + analyze)  →  Telegram
@@ -92,6 +92,7 @@ Requires the `claude` CLI on `PATH` (see step 3).
 | Message layout / language | `CLAUDE_PROMPT_TEMPLATE` in `idealista_notify.py` |
 | Gmail sender filter / lookback | `GMAIL_SEARCH` (Gmail `X-GM-RAW` syntax) |
 | Poll interval | `cron` in `.github/workflows/notify.yml` (GitHub minimum 5 min) |
+| Active hours | `gate` job in `.github/workflows/notify.yml` — DST-correct via `TZ=Europe/Madrid` |
 | Claude model | `CLAUDE_MODEL` env var (defaults to Claude Code's `haiku` alias) |
 
 ## Robustness
